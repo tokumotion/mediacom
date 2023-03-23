@@ -2,59 +2,84 @@ library(tidyverse); library(treemapify); library(wordcloud)
 library(topicmodels); library(tm); library(readxl); library(RColorBrewer)
 library(tidytext)
 
-data <- read_xlsx('~/Downloads/SearchKeywords-pacifico.com.pe,rimac.com,lapositiva.com.pe,mapfre.com.pe,interseguro.pe-(604)-(2022_02-2023_02) (1).xlsx', 
+raw_data <- read_xlsx('~/Downloads/SearchKeywords-pacifico.com.pe,rimac.com,lapositiva.com.pe,mapfre.com.pe,interseguro.pe-(604)-(2022_02-2023_02) (1).xlsx', 
                   sheet = 2, col_names = T)
 
-documents <- data[,1]
-corpus <- VCorpus(VectorSource(documents))
+data <- raw_data[,1]
 
-corpus <- tm_map(corpus, content_transformer(tolower))
-corpus <- tm_map(corpus, removePunctuation)
-corpus <- tm_map(corpus, removeWords, stopwords("spanish"))
-corpus <- tm_map(corpus, stripWhitespace)
+spanish_stop_words <- tibble::tibble(
+  word = stopwords::stopwords("es"),
+  lexicon = "spanish"
+)
 
-dtm <- DocumentTermMatrix(corpus)
+additional_stop_words <- tibble::tibble(
+  word = c("Peru", "Perú", "seguros", "seguro", "peru", "perú"),
+  lexicon = "custom_spanish"
+)
 
+spanish_stop_words <- dplyr::bind_rows(spanish_stop_words, 
+                                       additional_stop_words)
+
+# Preprocess the text data
+data_clean <- data %>%
+  dplyr::mutate(id = row_number()) %>%
+  unnest_tokens(word, `Search terms`) %>%
+  anti_join(spanish_stop_words) %>%
+  count(id, word, sort = TRUE)
+
+# Create a Document-Term Matrix (DTM)
+dtm <- data_clean %>%
+  cast_dtm(id, word, n)
+
+# Set the number of topics
 num_topics <- 7
-lda_model <- LDA(dtm, k = num_topics, control = list(seed = 123))
 
-terms(lda_model, 5)
-assignments <- topics(lda_model, 1)
+# Fit the LDA model
+lda_model <- LDA(dtm, k = num_topics, control = list(seed = 1234))
 
-num_terms <- 50
-term_probabilities <- terms(lda_model, num_terms)
+# Extract the topic-term probabilities
+term_probabilities <- tidy(lda_model, matrix = "beta")
 
-# Function to create a word cloud for a topic
-create_topic_wordcloud <- function(topic, lda_model, num_terms = 50) {
-  term_weights <- lda_model@beta[topic, ]
-  names(term_weights) <- terms(lda_model)
+# Extract the term-topic probabilities
+document_probabilities <- tidy(lda_model, matrix = "gamma")
+
+# Assign the most probable topic to each document
+document_topics <- document_probabilities %>%
+  group_by(document) %>%
+  top_n(1, wt = gamma) %>%
+  ungroup() %>%
+  arrange(document)
+
+# Convert the 'document' column to integer type
+document_topics <- document_topics %>%
+  mutate(document = as.integer(document))
+
+# Add the most probable topic to the original dataset
+data_with_topics <- data %>%
+  mutate(id = row_number()) %>%
+  left_join(document_topics, by = c("id" = "document")) %>%
+  select(-id, -gamma)
+
+create_topic_wordcloud <- function(topic, term_probabilities, lda_model) {
+  # Filter the term probabilities for the current topic
+  topic_terms <- term_probabilities %>%
+    filter(topic == !!topic) %>%
+    arrange(desc(beta)) %>%
+    head(50) # Select the top 30 terms for each topic
   
-  # Filter out terms with NA, negative or zero frequencies
-  valid_terms <- !is.na(term_weights) & term_weights > 0
-  term_weights <- term_weights[valid_terms]
-  
-  # Select the top num_terms for the topic
-  top_terms <- sort(term_weights, decreasing = TRUE)[1:num_terms]
-  
-  # Ensure min.freq does not exceed the maximum frequency value
-  min.freq.value <- min(0.001, max(top_terms))
-  
+  # Create a wordcloud for the current topic
   wordcloud(
-    words = names(top_terms),
-    freq = top_terms,
-    scale = c(3, 0.5),
-    min.freq = min.freq.value,
-    max.words = num_terms,
+    words = topic_terms$term,
+    freq = topic_terms$beta,
+    max.words = 50,
     random.order = FALSE,
-    rot.per = 0.35,
     colors = brewer.pal(8, "Dark2")
   )
 }
 
+num_topics <- 7
 
-# Create a word cloud for each topic
-par(mfrow = c(1, num_topics))
 for (topic in 1:num_topics) {
-  create_topic_wordcloud(topic, lda_model)
+  cat("Topic", topic, "\n")
+  create_topic_wordcloud(topic, term_probabilities, lda_model)
 }
-
