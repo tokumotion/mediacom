@@ -2,7 +2,7 @@ library(tidyverse); library(treemapify); library(wordcloud)
 library(topicmodels); library(tm); library(readxl); library(RColorBrewer)
 library(tidytext)
 
-raw_data <- read_xlsx('~/Downloads/SearchKeywords-pacifico.com.pe,rimac.com,lapositiva.com.pe,mapfre.com.pe,interseguro.pe-(604)-(2022_02-2023_02) (1).xlsx', 
+raw_data <- read_xlsx('~/Downloads/pacifico_kws.xlsx', 
                   sheet = 2, col_names = T)
 
 data <- raw_data[,1]
@@ -13,7 +13,7 @@ spanish_stop_words <- tibble::tibble(
 )
 
 additional_stop_words <- tibble::tibble(
-  word = c("Peru", "Perú", "seguros", "seguro", "peru", "perú"),
+  word = c("Peru", "Perú", "seguros", "seguro", "peru", "perú", "pacifico"),
   lexicon = "custom_spanish"
 )
 
@@ -32,7 +32,7 @@ dtm <- data_clean %>%
   cast_dtm(id, word, n)
 
 # Set the number of topics
-num_topics <- 7
+num_topics <- 5
 
 # Fit the LDA model
 lda_model <- LDA(dtm, k = num_topics, control = list(seed = 1234))
@@ -65,7 +65,7 @@ create_topic_wordcloud <- function(topic, term_probabilities, lda_model) {
   topic_terms <- term_probabilities %>%
     filter(topic == !!topic) %>%
     arrange(desc(beta)) %>%
-    head(50) # Select the top 30 terms for each topic
+    head(50) # Select the top 30 terms for each topich
   
   # Create a wordcloud for the current topic
   wordcloud(
@@ -77,7 +77,7 @@ create_topic_wordcloud <- function(topic, term_probabilities, lda_model) {
   )
 }
 
-num_topics <- 7
+num_topics <- 5
 
 for (topic in 1:num_topics) {
   cat("Topic", topic, "\n")
